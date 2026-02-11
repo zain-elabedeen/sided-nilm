@@ -1,0 +1,8 @@
+pandas
+numpy
+torch
+scikit-learn
+onnx
+onnxruntime
+onnxruntime-tools
+pyarrow
