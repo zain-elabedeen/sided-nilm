@@ -1,69 +1,172 @@
-# Installation
-`git clone https://github.com/YOUR_USERNAME/sided-nilm.git`
+# SIDED NILM
 
-`cd sided-nilm`
+Temporal convolutional network pipeline for non-intrusive load monitoring on the
+SIDED dataset. The model learns to disaggregate an aggregate power signal into
+five target channels:
 
-`pip install -r requirements.txt`
+- `EVSE`
+- `PV`
+- `CS`
+- `CHP`
+- `BA`
 
-Place the SIDED dataset inside:
-`data/sided.parquet`
+The pipeline preprocesses the source data, builds fixed-length time-series
+windows, trains a PyTorch TCN model, evaluates it on a held-out test split, and
+exports the trained model to ONNX.
 
-# Running the Full Pipeline
-`python run_training.py`
+## Project Layout
 
-# SIDED model training pipeline
+```text
+.
+├── requirements.txt
+├── run_training.py
+└── src
+    ├── dataset.py
+    ├── evaluate.py
+    ├── export.py
+    ├── model.py
+    ├── preprocess.py
+    ├── run_training.py
+    └── train.py
+```
 
-### src/preprocess.py
+Generated files are written under:
 
-Prepares the raw SIDED dataset for training:
-1.	Loads sided.parquet
-2.	Resamples to 5-minute intervals (if needed)
-3.	Cleans missing values
-4.	Saves processed version to: `data/processed/sided_processed.parquet`
+```text
+data/processed/sided_processed.parquet
+experiments/exp_001/model.pth
+experiments/exp_001/config.json
+experiments/exp_001/model.onnx
+```
 
-### src/dataset.py
+## Requirements
 
-Transforms time-series into windowed training samples:
-1.	Loads processed dataset
-2.	Sorts by time
-3.	Normalizes Aggregate column
-4.	Splits data temporally:	70% train, 15% validation, 15% test
-5.	Creates sliding windows
+- Python 3.10 or newer
+- A local SIDED dataset file at `data/sided.parquet`
+- PyTorch-compatible CPU or CUDA environment
 
-### src/model.py
+Install dependencies:
 
-Defines the TCN architecture:
-- 3 Temporal Convolution Blocks
--  Increasing dilation (1, 2, 4)
--  Batch normalization
-- ReLU activation
-- 1x1 convolution output layer
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-src/train.py
+## Data Format
 
-Trains the TCN model:
-1.	Loads training + validation datasets
-2.	Creates DataLoaders
-3.	Initializes:
--	Adam optimizer
--	L1 (MAE) loss
-4.	Training loop:
--	Forward pass
--	Compute loss
--	Backpropagation
--	Validation evaluation
+Place the raw SIDED parquet file here:
 
-5.	Saves best model to: `experiments/exp_001/model.pth`
+```text
+data/sided.parquet
+```
 
-### src/evaluate.py
+The parquet file is expected to include:
 
-Evaluates final model on test dataset:
-- Loads best model
-- Runs inference on test split
-- Computes MAE
+- `Time`
+- `Aggregate`
+- `EVSE`
+- `PV`
+- `CS`
+- `CHP`
+- `BA`
 
-### src/export.py
+`src/preprocess.py` resamples the data to five-minute intervals using `Time`,
+drops missing rows, and writes the processed parquet file to
+`data/processed/sided_processed.parquet`.
 
-Exports trained model to ONNX.
+## Run the Full Pipeline
 
-Exported file: `experiments/exp_001/model.onnx`
+From the repository root:
+
+```bash
+python run_training.py
+```
+
+This runs:
+
+1. `src/preprocess.py`
+2. `src/train.py`
+3. `src/evaluate.py`
+4. `src/export.py`
+
+## Run Individual Steps
+
+Preprocess the dataset:
+
+```bash
+python src/preprocess.py
+```
+
+Train the model:
+
+```bash
+python src/train.py
+```
+
+Evaluate the best checkpoint:
+
+```bash
+python src/evaluate.py
+```
+
+Export the trained model to ONNX:
+
+```bash
+python src/export.py
+```
+
+## Model
+
+The model in `src/model.py` is a temporal convolutional network with:
+
+- Three causal-style convolution blocks
+- Dilation rates of `1`, `2`, and `4`
+- Batch normalization and ReLU activations
+- A final `1x1` convolution that predicts the five appliance channels
+
+Inputs use a window size of `48`, representing four hours of data at five-minute
+resolution. The input tensor shape is:
+
+```text
+batch_size x 48 x 1
+```
+
+The output tensor shape is:
+
+```text
+batch_size x 48 x 5
+```
+
+## Training Defaults
+
+The current training script uses:
+
+- Train/validation/test split: `70% / 15% / 15%`
+- Batch size: `64`
+- Epochs: `30`
+- Optimizer: Adam
+- Learning rate: `1e-3`
+- Loss: L1 loss / MAE
+- Hidden channels: `32`
+
+The best validation checkpoint is saved to:
+
+```text
+experiments/exp_001/model.pth
+```
+
+## Evaluation
+
+`src/evaluate.py` loads the best checkpoint and reports mean absolute error on
+the test split.
+
+## ONNX Export
+
+`src/export.py` exports the trained PyTorch checkpoint to:
+
+```text
+experiments/exp_001/model.onnx
+```
+
+The exported graph uses a dynamic batch dimension and ONNX opset `14`.
